@@ -263,9 +263,14 @@ function startProjectServer(targetPort: number, projectDir: string, name: string
       console.log(`[BramCloud Runner] App "${name}" (${slug}) listening on port :${targetPort}`);
     });
 
+    serverInstance.on('error', (err: any) => {
+      console.warn(`[BramCloud Runner] Could not bind port :${targetPort} for app "${name}":`, err.message);
+      runningAppServers.delete(targetPort);
+    });
+
     runningAppServers.set(targetPort, serverInstance);
-  } catch (bindErr) {
-    console.warn(`Could not bind port ${targetPort}:`, bindErr);
+  } catch (bindErr: any) {
+    console.warn(`Could not bind port ${targetPort}:`, bindErr.message);
   }
 }
 
@@ -783,18 +788,29 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(__dirname, 'dist');
+    const distPath = fs.existsSync(path.join(__dirname, 'dist'))
+      ? path.join(__dirname, 'dist')
+      : fs.existsSync(path.join(__dirname, 'index.html'))
+      ? __dirname
+      : path.join(process.cwd(), 'dist');
+
     if (fs.existsSync(distPath)) {
       app.use(express.static(distPath));
       app.get('*', (_req, res) => {
         res.sendFile(path.join(distPath, 'index.html'));
       });
+    } else {
+      console.warn('⚠️ dist/ folder not found. Please run "npm run build" first.');
     }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const mainServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 BramCloud VPS Manager running on http://0.0.0.0:${PORT}`);
     console.log(`🌐 Allowed Host: app.gitainfo.online & Cloud Run preview`);
+  });
+
+  mainServer.on('error', (err: any) => {
+    console.error(`BramCloud main server error on port ${PORT}:`, err.message);
   });
 }
 
