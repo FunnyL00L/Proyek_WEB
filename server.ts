@@ -366,13 +366,28 @@ function saveProjectsDb(projects: any[]) {
 // Start mini web server for a project
 function startProjectServer(targetPort: number, projectDir: string, name: string, slug: string) {
   if (runningAppServers.has(targetPort)) {
-    return;
+    try {
+      runningAppServers.get(targetPort).close();
+      runningAppServers.delete(targetPort);
+    } catch (e) {
+      // Ignore
+    }
   }
   try {
     const miniApp = express();
-    miniApp.use(express.static(projectDir));
+    // Support subdirectories like dist/ or build/ if project files are inside a nested build folder
+    const publicDir = fs.existsSync(path.join(projectDir, 'dist', 'index.html'))
+      ? path.join(projectDir, 'dist')
+      : fs.existsSync(path.join(projectDir, 'build', 'index.html'))
+      ? path.join(projectDir, 'build')
+      : projectDir;
+
+    miniApp.use(express.static(publicDir));
     miniApp.get('*', (_req, res) => {
-      const indexPath = path.join(projectDir, 'index.html');
+      const indexPath = fs.existsSync(path.join(publicDir, 'index.html'))
+        ? path.join(publicDir, 'index.html')
+        : path.join(projectDir, 'index.html');
+
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
       } else {
@@ -385,7 +400,7 @@ function startProjectServer(targetPort: number, projectDir: string, name: string
     });
 
     const serverInstance = miniApp.listen(targetPort, '0.0.0.0', () => {
-      console.log(`[BramCloud Runner] App "${name}" (${slug}) listening on port :${targetPort}`);
+      console.log(`[BramCloud Runner] App "${name}" (${slug}) listening on port :${targetPort} serving ${publicDir}`);
     });
 
     serverInstance.on('error', (err: any) => {
@@ -654,9 +669,9 @@ app.post('/api/system/drop-caches', (_req, res) => {
   });
 });
 
-// 6. Real Projects Deploy
+// 6. Real Projects Deploy (Writes files, starts server, and auto-syncs Cloudflare)
 app.post('/api/projects/deploy', async (req, res) => {
-  const { slug, port, name, type, htmlPreviewContent, envVars } = req.body;
+  const { slug, port, name, type, htmlPreviewContent, envVars, cloudflareDomain, files } = req.body;
   const targetPort = parseInt(port, 10);
 
   if (!targetPort || !slug) {
@@ -669,8 +684,30 @@ app.post('/api/projects/deploy', async (req, res) => {
       fs.mkdirSync(projectDir, { recursive: true });
     }
 
-    if (htmlPreviewContent) {
+    let filesWritten = 0;
+    if (Array.isArray(files) && files.length > 0) {
+      for (const f of files) {
+        if (!f.path) continue;
+        const cleanPath = f.path.replace(/^\/+/, '');
+        const targetFilePath = path.join(projectDir, cleanPath);
+        fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
+        if (f.encoding === 'base64') {
+          fs.writeFileSync(targetFilePath, Buffer.from(f.content, 'base64'));
+        } else {
+          fs.writeFileSync(targetFilePath, f.content, 'utf-8');
+        }
+        filesWritten++;
+      }
+    }
+
+    // Fallback index.html if not provided in files
+    const hasIndexHtml = fs.existsSync(path.join(projectDir, 'index.html')) ||
+      fs.existsSync(path.join(projectDir, 'dist', 'index.html')) ||
+      fs.existsSync(path.join(projectDir, 'build', 'index.html'));
+
+    if (!hasIndexHtml && htmlPreviewContent) {
       fs.writeFileSync(path.join(projectDir, 'index.html'), htmlPreviewContent, 'utf-8');
+      filesWritten++;
     }
 
     const manifest = {
@@ -681,6 +718,8 @@ app.post('/api/projects/deploy', async (req, res) => {
       type,
       status: 'running',
       deployedAt: new Date().toISOString(),
+      cloudflareDomain: cloudflareDomain || undefined,
+      fileCount: filesWritten,
       envVars,
     };
 
@@ -694,15 +733,51 @@ app.post('/api/projects/deploy', async (req, res) => {
     }
     saveProjectsDb(currentProjects);
 
-    // Bind server
+    // Bind and start server on port
     startProjectServer(targetPort, projectDir, name, slug);
+
+    // Automatically sync Cloudflare Tunnel ingress rule
+    if (cloudflareDomain) {
+      const host = cloudflareDomain.includes('.') ? cloudflareDomain : `${cloudflareDomain}.gitainfo.online`;
+      const configPaths = [
+        '/etc/cloudflared/config.yml',
+        '/root/.cloudflared/config.yml',
+        path.join(os.homedir(), '.cloudflared/config.yml'),
+      ];
+
+      for (const cp of configPaths) {
+        if (fs.existsSync(cp)) {
+          try {
+            let content = fs.readFileSync(cp, 'utf-8');
+            if (!content.includes(host)) {
+              const ruleBlock = `  # Jalur ${name} (${slug})\n  - hostname: ${host}\n    service: http://localhost:${targetPort}\n\n`;
+              if (content.includes('- service: http_status:404')) {
+                content = content.replace('- service: http_status:404', `${ruleBlock}  - service: http_status:404`);
+              } else {
+                content += `\n${ruleBlock}  - service: http_status:404\n`;
+              }
+              fs.writeFileSync(cp, content, 'utf-8');
+            }
+          } catch (e) {
+            console.warn('Could not auto-insert ingress rule into', cp, e);
+          }
+        }
+      }
+
+      // Reload cloudflared
+      await runCmd('systemctl restart cloudflared || systemctl reload cloudflared || pkill -HUP cloudflared || true');
+
+      // Register route dns
+      runCmd(`cloudflared tunnel route dns c153020c-6f30-44ac-be40-5548a373c12e ${host} || true`);
+    }
 
     res.json({
       success: true,
-      message: `Proyek ${name} berhasil di-deploy pada port :${targetPort}`,
+      message: `Proyek ${name} berhasil di-deploy pada port :${targetPort} (${filesWritten} file disimpan)`,
       path: projectDir,
       port: targetPort,
       status: 'running',
+      filesWritten,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

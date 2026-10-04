@@ -55,12 +55,16 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
   const [selectedTunnelId, setSelectedTunnelId] = useState<string>(tunnels[0]?.id || '');
   const [subdomain, setSubdomain] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [folderName, setFolderName] = useState<string | null>(null);
+  const [preparedFiles, setPreparedFiles] = useState<Array<{ path: string; content: string; encoding: 'base64' | 'utf-8' }>>([]);
   const [extractedSummary, setExtractedSummary] = useState<string[]>([]);
   const [extractedHtml, setExtractedHtml] = useState<string | null>(null);
   const [extractedSize, setExtractedSize] = useState<number>(0);
   const [deployStep, setDeployStep] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
   const updateFileInputRef = useRef<HTMLInputElement>(null);
   const [targetUpdateProj, setTargetUpdateProj] = useState<AppProject | null>(null);
 
@@ -77,47 +81,142 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
       .replace(/^-|-$/g, '');
     setProjectSlug(slug);
     if (!subdomain || subdomain.includes('.')) {
-      setSubdomain(`${slug || 'app'}.bram.my.id`);
+      setSubdomain(`${slug || 'app'}.gitainfo.online`);
     }
   };
 
-  const handleFileChange = async (file: File) => {
-    setSelectedFile(file);
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.includes(',') ? result.split(',')[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const readFileAsText = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsText(file);
+    });
+  };
+
+  // Handler for direct Folder Upload (e.g. dist/ or build/ folder)
+  const handleFolderUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setDeployStep(`Membaca ${files.length} file dari folder...`);
+
     try {
-      if (file.name.endsWith('.zip')) {
-        const zip = new JSZip();
-        const loadedZip = await zip.loadAsync(file);
-        const fileNames = Object.keys(loadedZip.files);
-        setExtractedSummary(fileNames.slice(0, 8));
-        setExtractedSize(file.size);
+      const fileItems: Array<{ path: string; content: string; encoding: 'base64' | 'utf-8' }> = [];
+      const summary: string[] = [];
+      let totalSize = 0;
+      let foundHtml: string | null = null;
 
-        const indexHtmlFile = loadedZip.file(/(^|\/)index\.html$/i)[0];
-        if (indexHtmlFile) {
-          const content = await indexHtmlFile.async('text');
-          setExtractedHtml(content);
+      // Extract top folder name
+      const firstRel = (files[0] as any).webkitRelativePath || files[0].name;
+      const detectedTopDir = firstRel.includes('/') ? firstRel.split('/')[0] : 'proyek-web';
+      setFolderName(detectedTopDir);
+
+      if (!projectName) {
+        handleNameChange(detectedTopDir.replace(/[-_]/g, ' '));
+      }
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        totalSize += file.size;
+
+        let relPath = (file as any).webkitRelativePath || file.name;
+        // Strip top folder name if present (e.g. dist/index.html -> index.html)
+        const parts = relPath.split('/');
+        if (parts.length > 1) {
+          relPath = parts.slice(1).join('/');
+        }
+
+        summary.push(relPath);
+
+        const isText = file.name.endsWith('.html') || file.name.endsWith('.htm') || file.name.endsWith('.css') || file.name.endsWith('.js') || file.name.endsWith('.json') || file.name.endsWith('.svg') || file.name.endsWith('.txt');
+
+        if (isText) {
+          const text = await readFileAsText(file);
+          if (relPath === 'index.html' || file.name === 'index.html') {
+            foundHtml = text;
+          }
+          fileItems.push({ path: relPath, content: text, encoding: 'utf-8' });
         } else {
-          setExtractedHtml(null);
-        }
-
-        if (!projectName) {
-          const baseName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
-          handleNameChange(baseName);
-        }
-      } else {
-        setExtractedSummary([file.name]);
-        setExtractedSize(file.size);
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          setExtractedHtml(e.target?.result as string);
-        };
-        reader.readAsText(file);
-        if (!projectName) {
-          handleNameChange(file.name.replace(/\.[^/.]+$/, ''));
+          const base64 = await readFileAsBase64(file);
+          fileItems.push({ path: relPath, content: base64, encoding: 'base64' });
         }
       }
+
+      setPreparedFiles(fileItems);
+      setExtractedSummary(summary.slice(0, 10));
+      setExtractedSize(totalSize);
+      setSelectedFile(files[0]);
+      if (foundHtml) setExtractedHtml(foundHtml);
+      setDeployStep(null);
+    } catch (err) {
+      console.error('Error reading folder:', err);
+      alert('Gagal membaca isi folder build.');
+      setDeployStep(null);
+    }
+  };
+
+  // Handler for ZIP file upload
+  const handleZipUpload = async (file: File) => {
+    setSelectedFile(file);
+    setFolderName(file.name);
+    setDeployStep(`Mengekstrak paket zip: ${file.name}...`);
+
+    try {
+      const zip = new JSZip();
+      const loadedZip = await zip.loadAsync(file);
+      const fileItems: Array<{ path: string; content: string; encoding: 'base64' | 'utf-8' }> = [];
+      const summary: string[] = [];
+      let foundHtml: string | null = null;
+
+      for (const [rawPath, zipEntry] of Object.entries(loadedZip.files)) {
+        if (zipEntry.dir) continue;
+        let cleanPath = rawPath.replace(/^\/+/, '');
+        // Strip outer folder if wrapped inside a root dir
+        const parts = cleanPath.split('/');
+        if (parts.length > 1 && (parts[0] === 'dist' || parts[0] === 'build' || parts[0] === file.name.replace(/\.zip$/i, ''))) {
+          cleanPath = parts.slice(1).join('/');
+        }
+        summary.push(cleanPath);
+
+        const isText = cleanPath.endsWith('.html') || cleanPath.endsWith('.css') || cleanPath.endsWith('.js') || cleanPath.endsWith('.json') || cleanPath.endsWith('.svg') || cleanPath.endsWith('.txt');
+        if (isText) {
+          const text = await zipEntry.async('text');
+          if (cleanPath === 'index.html' || cleanPath.endsWith('/index.html')) {
+            foundHtml = text;
+          }
+          fileItems.push({ path: cleanPath, content: text, encoding: 'utf-8' });
+        } else {
+          const base64 = await zipEntry.async('base64');
+          fileItems.push({ path: cleanPath, content: base64, encoding: 'base64' });
+        }
+      }
+
+      setPreparedFiles(fileItems);
+      setExtractedSummary(summary.slice(0, 10));
+      setExtractedSize(file.size);
+      if (foundHtml) setExtractedHtml(foundHtml);
+
+      if (!projectName) {
+        const baseName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+        handleNameChange(baseName);
+      }
+      setDeployStep(null);
     } catch (err) {
       console.error('Error reading zip:', err);
       alert('Gagal membaca file zip build web.');
+      setDeployStep(null);
     }
   };
 
@@ -293,8 +392,10 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
         port: newProj.port,
         type: newProj.type,
         htmlPreviewContent: newProj.htmlPreviewContent,
+        cloudflareDomain: enableCloudflare ? subdomain : undefined,
         envVars: newProj.envVars,
-      }).catch((e) => console.warn('Backend deploy notify:', e));
+        files: preparedFiles,
+      } as any).catch((e) => console.warn('Backend deploy notify:', e));
 
       if (enableCloudflare && chosenTunnel) {
         const updatedTunnels = tunnels.map((t) => {
@@ -333,6 +434,8 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
     setProjectName('');
     setProjectSlug('');
     setSelectedFile(null);
+    setFolderName(null);
+    setPreparedFiles([]);
     setExtractedSummary([]);
     setExtractedHtml(null);
     setExtractedSize(0);
@@ -566,38 +669,83 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
                 </div>
               )}
 
-              {/* Upload Dropzone */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  File Build Web (.zip atau index.html)
+              {/* Upload Dropzone with Dedicated Folder & ZIP Buttons */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Pilih Sumber Build Web (Folder dist/build atau File .zip)
                 </label>
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50/70 hover:bg-slate-50 rounded-lg p-5 text-center cursor-pointer transition-colors"
-                >
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    accept=".zip,.html,.htm"
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        handleFileChange(e.target.files[0]);
-                      }
-                    }}
-                  />
-                  <FolderArchive className="w-8 h-8 text-slate-400 mx-auto mb-1.5" />
-                  <p className="font-medium text-slate-700">
-                    {selectedFile ? selectedFile.name : 'Pilih file build (.zip / dist)'}
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Mendukung build Vite, Next.js static, Vue, atau file HTML biasa
-                  </p>
+
+                {/* Hidden Inputs */}
+                <input
+                  type="file"
+                  ref={folderInputRef}
+                  {...({ webkitdirectory: '', directory: '', multiple: true } as any)}
+                  className="hidden"
+                  onChange={(e) => handleFolderUpload(e.target.files)}
+                />
+                <input
+                  type="file"
+                  ref={zipInputRef}
+                  accept=".zip"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleZipUpload(e.target.files[0]);
+                    }
+                  }}
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Folder Upload Button */}
+                  <div
+                    onClick={() => folderInputRef.current?.click()}
+                    className="border-2 border-dashed border-sky-300 hover:border-sky-500 bg-sky-50/50 hover:bg-sky-50 rounded-xl p-4 text-center cursor-pointer transition-all"
+                  >
+                    <FolderArchive className="w-7 h-7 text-sky-600 mx-auto mb-1.5" />
+                    <p className="font-bold text-slate-800 text-xs">Upload Folder Langsung</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Pilih folder <strong>dist/</strong> atau <strong>build/</strong> tanpa perlu di-zip
+                    </p>
+                  </div>
+
+                  {/* ZIP Upload Button */}
+                  <div
+                    onClick={() => zipInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-300 hover:border-slate-400 bg-slate-50/70 hover:bg-slate-50 rounded-xl p-4 text-center cursor-pointer transition-all"
+                  >
+                    <UploadCloud className="w-7 h-7 text-slate-500 mx-auto mb-1.5" />
+                    <p className="font-bold text-slate-800 text-xs">Upload Arsip .ZIP</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Pilih file arsip build bundle (.zip)
+                    </p>
+                  </div>
                 </div>
 
+                {/* Uploaded Files Status Banner */}
+                {preparedFiles.length > 0 && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs space-y-1">
+                    <div className="flex items-center justify-between text-emerald-900 font-semibold">
+                      <span className="flex items-center gap-1.5">
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span>{preparedFiles.length} File Terbaca ({folderName || 'dist'})</span>
+                      </span>
+                      <span className="font-mono text-[11px]">
+                        {(extractedSize / (1024 * 1024)).toFixed(2)} MB
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-emerald-800 font-mono flex flex-wrap gap-1 mt-1">
+                      {extractedSummary.map((fn, idx) => (
+                        <span key={idx} className="bg-emerald-100/80 px-1.5 py-0.5 rounded text-[10px]">
+                          {fn}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Quick Presets */}
-                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[11px] text-slate-400">Template uji:</span>
+                <div className="pt-1 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-slate-400">Template uji bawaan:</span>
                   <button
                     type="button"
                     onClick={() => handlePresetSelect('portfolio')}
@@ -723,18 +871,21 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
 
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Public Hostname / Domain:
+                        Public Hostname / Domain (Cloudflare):
                       </label>
                       <input
                         type="text"
                         value={subdomain}
                         onChange={(e) => setSubdomain(e.target.value)}
-                        placeholder="app.bram.my.id"
-                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono text-xs text-slate-900 focus:outline-none"
+                        placeholder="contoh: pkbibuleleng-webhub.gitainfo.online"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-sky-500"
                       />
-                      <p className="text-[11px] text-slate-400 mt-1 font-mono">
-                        https://{subdomain || 'app.bram.my.id'} ➔ localhost:{effectivePort}
-                      </p>
+                      <div className="mt-1.5 p-2 bg-sky-50/80 rounded border border-sky-100 text-[11px] font-mono text-sky-900 space-y-0.5">
+                        <div>🌐 Ingress: <strong>https://{subdomain || 'app.gitainfo.online'}</strong> ➔ localhost:{effectivePort}</div>
+                        <div className="text-[10px] text-slate-500 font-sans">
+                          ⚡ Sistem otomatis menyisipkan rute ke <code className="font-mono bg-sky-100 px-1 py-0.5 rounded">/etc/cloudflared/config.yml</code> dan me-reload daemon VPS.
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
