@@ -1,0 +1,6 @@
+{
+  "name": "BramCloud VPS Manager",
+  "description": "Sistem manajemen VPS cerdas untuk pemantauan server real-time, manajemen port otomatis bebas bentrok, firewall, integrasi Cloudflare Tunnel, dan one-click deploy proyek.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
