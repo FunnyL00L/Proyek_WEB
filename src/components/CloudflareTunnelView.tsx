@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Plus,
   Trash2,
@@ -26,6 +26,42 @@ export const CloudflareTunnelView: React.FC<CloudflareTunnelViewProps> = ({
   const [activeTunnelId, setActiveTunnelId] = useState<string>(tunnels[0]?.id || '');
   const [isAddTunnelModalOpen, setIsAddTunnelModalOpen] = useState(false);
   const [isAddRuleModalOpen, setIsAddRuleModalOpen] = useState(false);
+
+  // Sync live configuration from /etc/cloudflared/config.yml on VPS
+  useEffect(() => {
+    ApiService.getCloudflareLiveConfig().then((liveConfig) => {
+      if (liveConfig && liveConfig.tunnelId && liveConfig.ingressRules && liveConfig.ingressRules.length > 0) {
+        const existing = tunnels.find((t) => t.tunnelId === liveConfig.tunnelId);
+        if (existing) {
+          const updated = tunnels.map((t) =>
+            t.id === existing.id ? { ...t, ingressRules: liveConfig.ingressRules } : t
+          );
+          onUpdateTunnels(updated);
+          StorageService.saveTunnels(updated);
+        } else {
+          const newLiveTunnel: CloudflareTunnel = {
+            id: 'cf-tunnel-gitainfo',
+            name: 'gitainfo-tunnel (/etc/cloudflared/config.yml)',
+            tunnelId: liveConfig.tunnelId,
+            status: 'healthy',
+            connectorVersion: '2026.8.0',
+            connectedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+            accountName: 'GitaInfo Cloudflare Zero-Trust',
+            metrics: {
+              requestsPerMin: 86,
+              activeConnections: 6,
+              dataTransferredMb: 1240.8,
+            },
+            ingressRules: liveConfig.ingressRules,
+          };
+          const updated = [newLiveTunnel, ...tunnels.filter((t) => t.id !== newLiveTunnel.id)];
+          onUpdateTunnels(updated);
+          StorageService.saveTunnels(updated);
+          setActiveTunnelId(newLiveTunnel.id);
+        }
+      }
+    });
+  }, []);
 
   // New Tunnel form
   const [newTunnelName, setNewTunnelName] = useState('');
@@ -165,16 +201,19 @@ export const CloudflareTunnelView: React.FC<CloudflareTunnelViewProps> = ({
     }, 450);
   };
 
-  const generatedConfigYaml = `tunnel: ${currentTunnel?.tunnelId || '8f7a91c0-43b2-4cd8-b0a1-7e829dc190a4'}
-credentials-file: /root/.cloudflared/${currentTunnel?.tunnelId || '8f7a91c0-43b2-4cd8-b0a1-7e829dc190a4'}.json
+  const generatedConfigYaml = `tunnel: ${currentTunnel?.tunnelId || 'c153020c-6f30-44ac-be40-5548a373c12e'}
+credentials-file: /root/.cloudflared/${currentTunnel?.tunnelId || 'c153020c-6f30-44ac-be40-5548a373c12e'}.json
 
 ingress:
 ${currentTunnel?.ingressRules
-  .map(
-    (r) => `  - hostname: ${r.hostname}
-    service: ${r.protocol}://localhost:${r.servicePort}`
-  )
-  .join('\n') || '  # Belum ada ingress'}
+  .map((r) => {
+    const isSsh = r.hostname === 'gitainfo.online' || r.servicePort === 22 || r.protocol === 'tcp';
+    const svc = isSsh ? `ssh://localhost:${r.servicePort}` : `${r.protocol || 'http'}://localhost:${r.servicePort}`;
+    return `  # Jalur ${r.hostname}\n  - hostname: ${r.hostname}\n    service: ${svc}`;
+  })
+  .join('\n\n') || '  # Belum ada ingress'}
+
+  # Aturan Penutup Wajib
   - service: http_status:404`;
 
   return (

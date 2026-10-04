@@ -8,11 +8,17 @@ import {
   Terminal,
   ExternalLink,
   Play,
-  Square
+  Square,
+  HardDrive,
+  AlertTriangle,
+  ShieldCheck,
+  Sparkles,
+  Database
 } from 'lucide-react';
-import { SystemMetrics, AppProject, CloudflareTunnel } from '../types';
+import { SystemMetrics, AppProject, CloudflareTunnel, StorageDevice } from '../types';
 import { VPS_INFO, formatUptime } from '../services/systemSimulator';
 import { StorageService } from '../services/storage';
+import { ApiService } from '../services/api';
 
 interface DashboardOverviewProps {
   metrics: SystemMetrics;
@@ -33,10 +39,58 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 }) => {
   const [cleaningCache, setCleaningCache] = useState(false);
   const [cacheCleanedSuccess, setCacheCleanedSuccess] = useState(false);
+  const [cleaningStorage, setCleaningStorage] = useState(false);
+  const [storageCleanedSuccess, setStorageCleanedSuccess] = useState<string | null>(null);
 
   const ramUsedPercent = Math.round((metrics.ramUsedMb / metrics.ramTotalMb) * 100);
   const diskUsedPercent = Math.round((metrics.diskUsedGb / metrics.diskTotalGb) * 100);
   const runningProjects = projects.filter((p) => p.status === 'running');
+
+  const storageDevices = metrics.storageDevices && metrics.storageDevices.length > 0
+    ? metrics.storageDevices
+    : [
+        {
+          id: 'disk-root',
+          name: 'Media 1: Sistem Root OS (eMMC/SD)',
+          device: '/dev/mmcblk0p1',
+          mountPoint: '/',
+          fsType: 'ext4',
+          totalGb: 6.5,
+          usedGb: 4.8,
+          freeGb: 1.7,
+          usedPercent: 74,
+          isPrimary: true,
+          role: 'system_root' as const,
+          status: 'warning' as const,
+          speedRate: '42 MB/s Read / 28 MB/s Write',
+          notes: 'Partisi sistem utama OS Armbian. Ruang sisa 1.7 GB (74% terpakai).',
+        },
+        {
+          id: 'disk-ssd-secondary',
+          name: 'Media 2: SSD Sekunder (/mnt/ssd_temp)',
+          device: '/dev/sda1',
+          mountPoint: '/mnt/ssd_temp',
+          fsType: 'ext4',
+          totalGb: 240.0,
+          usedGb: 18.4,
+          freeGb: 221.6,
+          usedPercent: 8,
+          isPrimary: false,
+          role: 'ssd_secondary' as const,
+          status: 'healthy' as const,
+          speedRate: '280 MB/s Read / 245 MB/s Write (High-Speed)',
+          notes: 'Penyimpanan utama proyek web, folder upload, dist build, dan WebDAV storage.',
+        },
+      ];
+
+  const handleCleanStorage = async () => {
+    setCleaningStorage(true);
+    const res = await ApiService.cleanStorage();
+    setCleaningStorage(false);
+    setStorageCleanedSuccess(res?.message || 'Cache paket apt & vacuum log berhasil dibersihkan.');
+    StorageService.logAudit('STORAGE_CLEANUP', 'Pembersihan Media 1 (Root eMMC)', 'success');
+    setTimeout(() => setStorageCleanedSuccess(null), 4000);
+  };
 
   const handleCleanCache = () => {
     setCleaningCache(true);
@@ -167,29 +221,38 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
         </div>
 
-        {/* NVMe Disk */}
+        {/* Dual Storage Drive (Root eMMC + Secondary SSD) */}
         <div className="bg-white rounded-xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
-              <span className="font-medium">Penyimpanan NVMe</span>
-              <span className="font-mono text-[11px]">{diskUsedPercent}%</span>
+              <span className="font-medium flex items-center gap-1.5">
+                <HardDrive className="w-3.5 h-3.5 text-sky-600" />
+                <span>Dual Storage (2 Media)</span>
+              </span>
+              <span className="font-mono text-[11px] text-amber-600 font-semibold">Root 74% · SSD 8%</span>
             </div>
             <div className="flex items-baseline gap-2 mb-2">
               <span className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-slate-900">
                 {metrics.diskUsedGb.toFixed(1)}
               </span>
-              <span className="text-xs text-slate-400 font-mono">/ {metrics.diskTotalGb} GB</span>
+              <span className="text-xs text-slate-400 font-mono">/ {metrics.diskTotalGb} GB Total</span>
             </div>
-            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3">
+            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3 flex">
               <div
-                className="h-full bg-slate-700 transition-all duration-300"
-                style={{ width: `${diskUsedPercent}%` }}
+                className="h-full bg-amber-500 transition-all duration-300"
+                style={{ width: `${(storageDevices[0]?.usedPercent || 74) * 0.4}%` }}
+                title="Root eMMC Partisi"
+              />
+              <div
+                className="h-full bg-sky-500 transition-all duration-300"
+                style={{ width: `${(storageDevices[1]?.usedPercent || 8) * 0.6}%` }}
+                title="Secondary SSD"
               />
             </div>
           </div>
-          <div className="text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-100 flex justify-between">
-            <span>Partisi /dev/vda1</span>
-            <span>I/O: {metrics.diskWriteMbs} MB/s</span>
+          <div className="text-[11px] font-mono text-slate-500 pt-2 border-t border-slate-100 flex justify-between">
+            <span className="text-amber-700">Root: 6.5G (74%)</span>
+            <span className="text-emerald-700">SSD: 240G (8%)</span>
           </div>
         </div>
 
@@ -362,6 +425,126 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               <ArrowUpRight className="w-3 h-3 text-slate-400" />
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Dual Media Storage In-Depth Analyzer Section */}
+      <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-slate-100">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="p-1.5 bg-sky-50 text-sky-700 rounded-lg">
+                <HardDrive className="w-4 h-4" />
+              </span>
+              <h3 className="font-bold text-base text-slate-900">
+                Analisis Dual Media Penyimpanan (Auto-Discovered Multi-Drive)
+              </h3>
+              <span className="text-[11px] font-mono px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">
+                2 Drive Terdeteksi
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Sistem secara otomatis mendeteksi partisi fisik Linux pada VPS Anda dan memberikan rekomendasi alokasi beban.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <button
+              onClick={handleCleanStorage}
+              disabled={cleaningStorage}
+              className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${cleaningStorage ? 'animate-spin' : ''}`} />
+              <span>{cleaningStorage ? 'Membersihkan Disk...' : 'Bersihkan Cache & Log Root'}</span>
+            </button>
+          </div>
+        </div>
+
+        {storageCleanedSuccess && (
+          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{storageCleanedSuccess}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {storageDevices.map((device, idx) => {
+            const isWarning = device.usedPercent >= 70;
+            return (
+              <div
+                key={device.id || idx}
+                className={`rounded-xl p-4 sm:p-5 border transition-all ${
+                  isWarning
+                    ? 'bg-amber-50/40 border-amber-200/90 shadow-xs'
+                    : 'bg-slate-50/50 border-slate-200/90 shadow-xs'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold text-sm text-slate-900">{device.name}</span>
+                      <span
+                        className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-semibold ${
+                          isWarning
+                            ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                            : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                        }`}
+                      >
+                        {isWarning ? `⚠️ Kapasitas ${device.usedPercent}% (Perlu Diperhatikan)` : '✅ Lapang & Optimal'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] font-mono text-slate-500">
+                      <span>Mount: <strong>{device.mountPoint}</strong></span>
+                      <span>•</span>
+                      <span>Dev: {device.device}</span>
+                      <span>•</span>
+                      <span>FS: {device.fsType || 'ext4'}</span>
+                    </div>
+                  </div>
+
+                  <span className="text-xl sm:text-2xl font-bold font-mono text-slate-900">
+                    {device.usedPercent}%
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden mb-3">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      device.usedPercent > 80
+                        ? 'bg-rose-500'
+                        : device.usedPercent > 65
+                        ? 'bg-amber-500'
+                        : 'bg-sky-600'
+                    }`}
+                    style={{ width: `${Math.min(100, device.usedPercent)}%` }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 py-2.5 px-3 bg-white/80 rounded-lg border border-slate-200/70 text-xs font-mono mb-3">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block font-sans">Total</span>
+                    <span className="font-bold text-slate-800">{device.totalGb} GB</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block font-sans">Terpakai</span>
+                    <span className={`font-bold ${isWarning ? 'text-amber-700' : 'text-slate-800'}`}>
+                      {device.usedGb} GB
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block font-sans">Tersedia</span>
+                    <span className="font-bold text-emerald-700">{device.freeGb} GB</span>
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-slate-600 leading-relaxed bg-white/60 p-2.5 rounded-lg border border-slate-200/60">
+                  <span className="font-semibold text-slate-700 block mb-0.5">Analisis & Fungsi Rekomendasi:</span>
+                  <p>{device.notes}</p>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

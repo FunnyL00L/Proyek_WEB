@@ -1,3 +1,20 @@
+export interface StorageDevice {
+  id: string;
+  name: string; // e.g. "Root OS Storage (eMMC/SD)" or "SSD Eksternal (/mnt/ssd_temp)"
+  device: string; // e.g. "/dev/mmcblk0p1" or "/dev/sda1"
+  mountPoint: string; // e.g. "/" or "/mnt/ssd_temp"
+  fsType?: string; // e.g. "ext4", "btrfs"
+  totalGb: number;
+  usedGb: number;
+  freeGb: number;
+  usedPercent: number;
+  isPrimary: boolean;
+  role: 'system_root' | 'ssd_secondary' | 'data_volume';
+  status: 'healthy' | 'warning' | 'critical';
+  speedRate?: string;
+  notes?: string;
+}
+
 export interface SystemMetrics {
   cpuUsage: number; // percentage 0-100
   cpuCores: number;
@@ -9,6 +26,8 @@ export interface SystemMetrics {
   ramFreeMb: number;
   swapTotalMb: number;
   swapUsedMb: number;
+  zramTotalMb?: number;
+  zramUsedMb?: number;
   diskTotalGb: number;
   diskUsedGb: number;
   diskReadMbs: number;
@@ -17,6 +36,7 @@ export interface SystemMetrics {
   networkTxKbps: number;
   uptimeSeconds: number;
   temperatureC: number;
+  storageDevices?: StorageDevice[];
 }
 
 export type ProjectStatus = 'running' | 'stopped' | 'building' | 'error';

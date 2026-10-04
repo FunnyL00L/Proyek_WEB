@@ -217,6 +217,32 @@ export const ApiService = {
     return null;
   },
 
+  // Read live Cloudflare config directly from /etc/cloudflared/config.yml
+  async getCloudflareLiveConfig(): Promise<any | null> {
+    try {
+      const res = await fetch('/api/cloudflare/config');
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      // Ignore
+    }
+    return null;
+  },
+
+  // Perform disk storage cleanup on Root eMMC and SSD
+  async cleanStorage(): Promise<{ success: boolean; message: string; freedMb: number } | null> {
+    try {
+      const res = await fetch('/api/system/clean-storage', { method: 'POST' });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      // Ignore
+    }
+    return null;
+  },
+
   // Fetch real system journalctl logs
   async getSystemLogs(): Promise<any[] | null> {
     try {

@@ -1,39 +1,38 @@
 import { SystemMetrics, SystemLogEntry } from '../types';
 
 export const VPS_INFO = {
-  hostname: 'vps-sg-01.bramnet.id',
-  publicIp: '103.179.54.21',
-  privateIp: '10.0.4.15',
-  location: 'Singapore (Equinix SG3 Datacenter)',
-  os: 'Ubuntu 24.04.1 LTS (Noble Numbat 64-bit)',
-  kernel: 'Linux 6.8.0-45-generic x86_64',
-  virtualization: 'KVM Dedicated vCPU',
+  hostname: 'gitainfo.online',
+  publicIp: '103.143.220.18',
+  privateIp: '192.168.30.135',
+  location: 'Indonesia (Armbian S905x Node)',
+  os: 'Armbian Linux (Ubuntu 24.04 noble)',
+  kernel: 'Linux 6.1.137-ophub aarch64',
+  virtualization: 'Baremetal ARMv8 (Aml.S905x Quad-Core)',
   cores: 4,
-  cpuModel: 'AMD EPYC 7702 4-Core Processor @ 3.35GHz',
-  ramTotalMb: 8192,
-  swapTotalMb: 4096,
-  diskTotalGb: 80.0,
-  installedEngines: ['Node.js v20.12.2', 'Nginx 1.24.0', 'cloudflared 2026.8.0', 'UFW 0.36.2', 'PM2 5.3.1', 'Docker 27.2.0'],
+  cpuModel: 'Amlogic S905x ARMv8 Processor (Cortex-A53 @ 1.51GHz)',
+  ramTotalMb: 788,
+  swapTotalMb: 394,
+  diskTotalGb: 246.5,
+  installedEngines: ['Node.js v20.x', 'Nginx 1.24', 'cloudflared (Tunnel Active)', 'UFW Firewall', 'PM2', 'WebDAV Storage'],
 };
 
-let currentUptime = 24 * 3600 * 18 + 3600 * 7 + 420; // 18d 7h 7m
-let currentCpu = 18.4;
-let currentRamUsed = 3140; // MB
-let currentCached = 1850; // MB
-let currentDiskUsed = 28.4; // GB
-let currentRx = 450; // kbps
-let currentTx = 780; // kbps
+let currentUptime = 13 * 24 * 3600 + 9 * 3600 + 480; // 13 days 9h
+let currentCpu = 7.4;
+let currentRamUsed = 458; // MB (58% of 788M)
+let currentCached = 142; // MB
+let currentRx = 240; // kbps
+let currentTx = 380; // kbps
 
 const sampleLogPool: Array<{ level: SystemLogEntry['level']; category: SystemLogEntry['category']; msg: string }> = [
-  { level: 'info', category: 'system', msg: 'systemd[1]: Started BramCloud Process Monitor worker.' },
-  { level: 'info', category: 'port', msg: 'kernel: TCP connection established on port 3001 from 108.162.245.12' },
-  { level: 'info', category: 'cloudflare', msg: 'cloudflared[921]: Connection to Singapore edge cf-edge-03 OK (RTT: 4.2ms)' },
-  { level: 'info', category: 'system', msg: 'cron[624]: (root) CMD (/usr/local/bin/vps-healthcheck > /dev/null 2>&1)' },
-  { level: 'success', category: 'deploy', msg: 'pm2[3412]: App "bram-store" online - Health check passed in 12ms' },
-  { level: 'warn', category: 'firewall', msg: 'ufw[audit]: [UFW BLOCK] IN=eth0 OUT= SRC=185.190.14.22 SPT=51290 DPT=23 PROTO=TCP' },
-  { level: 'info', category: 'port', msg: 'nginx[1042]: 103.179.54.21 - "GET /api/v1/health HTTP/1.1" 200 48' },
-  { level: 'info', category: 'cloudflare', msg: 'cloudflared[921]: Registered tunnel tunnel-sg-01 with 4 active routes' },
-  { level: 'info', category: 'system', msg: 'kernel: [RAM] Page cache sync completed successfully' }
+  { level: 'info', category: 'system', msg: 'systemd[1]: BramCloud Daemon healthy on Armbian noble.' },
+  { level: 'info', category: 'port', msg: 'kernel: TCP connection established on port 3000 from 192.168.30.1' },
+  { level: 'info', category: 'cloudflare', msg: 'cloudflared[tunnel]: Connection to Cloudflare edge OK (RTT: 38ms)' },
+  { level: 'info', category: 'system', msg: 'cron: (root) CMD (/usr/local/bin/armbian-ram-sync)' },
+  { level: 'success', category: 'deploy', msg: 'pm2: App "proyek-web" online in fork mode on SSD /mnt/ssd_temp' },
+  { level: 'info', category: 'firewall', msg: 'ufw: Rule active - 22/tcp (SSH), 3000/tcp (WEB), 8080/tcp (WEBDAV)' },
+  { level: 'info', category: 'port', msg: 'cloudflared: Route app.gitainfo.online -> localhost:3000 200 OK' },
+  { level: 'info', category: 'cloudflare', msg: 'cloudflared: Route folder.gitainfo.online -> localhost:8080 200 OK' },
+  { level: 'info', category: 'system', msg: 'kernel: Storage auto-check /mnt/ssd_temp (ext4) mounted clean' }
 ];
 
 export function getInitialMetrics(): SystemMetrics {
@@ -41,21 +40,57 @@ export function getInitialMetrics(): SystemMetrics {
     cpuUsage: currentCpu,
     cpuCores: VPS_INFO.cores,
     cpuModel: VPS_INFO.cpuModel,
-    loadAverage: [0.42, 0.58, 0.65],
+    loadAverage: [0.14, 0.22, 0.18],
     ramTotalMb: VPS_INFO.ramTotalMb,
     ramUsedMb: currentRamUsed,
     ramCachedMb: currentCached,
-    ramFreeMb: VPS_INFO.ramTotalMb - (currentRamUsed + currentCached),
+    ramFreeMb: Math.max(50, VPS_INFO.ramTotalMb - (currentRamUsed + currentCached)),
     swapTotalMb: VPS_INFO.swapTotalMb,
-    swapUsedMb: 320,
-    diskTotalGb: VPS_INFO.diskTotalGb,
-    diskUsedGb: currentDiskUsed,
-    diskReadMbs: 1.4,
-    diskWriteMbs: 3.8,
+    swapUsedMb: 201, // Zram 51% of 394M
+    zramTotalMb: 394,
+    zramUsedMb: 201,
+    diskTotalGb: 246.5,
+    diskUsedGb: 23.2,
+    diskReadMbs: 0.8,
+    diskWriteMbs: 1.2,
     networkRxKbps: currentRx,
     networkTxKbps: currentTx,
     uptimeSeconds: currentUptime,
-    temperatureC: 41.5,
+    temperatureC: 57.5,
+    storageDevices: [
+      {
+        id: 'disk-root',
+        name: 'Media 1: Penyimpanan Sistem Root (eMMC/SD)',
+        device: '/dev/mmcblk0p1',
+        mountPoint: '/',
+        fsType: 'ext4',
+        totalGb: 6.5,
+        usedGb: 4.8,
+        freeGb: 1.7,
+        usedPercent: 74,
+        isPrimary: true,
+        role: 'system_root',
+        status: 'warning',
+        speedRate: '42 MB/s Read / 28 MB/s Write',
+        notes: 'Partisi sistem utama OS Armbian. Ruang sisa 1.7 GB (Perlu monitoring & pembersihan berkala).'
+      },
+      {
+        id: 'disk-ssd-secondary',
+        name: 'Media 2: SSD Sekunder (/mnt/ssd_temp)',
+        device: '/dev/sda1',
+        mountPoint: '/mnt/ssd_temp',
+        fsType: 'ext4',
+        totalGb: 240.0,
+        usedGb: 18.4,
+        freeGb: 221.6,
+        usedPercent: 8,
+        isPrimary: false,
+        role: 'ssd_secondary',
+        status: 'healthy',
+        speedRate: '280 MB/s Read / 245 MB/s Write (High-Speed)',
+        notes: 'Penyimpanan utama proyek web, folder upload, dist build, dan WebDAV storage.'
+      }
+    ]
   };
 }
 
