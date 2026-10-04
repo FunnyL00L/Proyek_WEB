@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { CloudflareTunnel, IngressRule, AppProject } from '../types';
 import { StorageService } from '../services/storage';
+import { ApiService } from '../services/api';
 
 interface CloudflareTunnelViewProps {
   tunnels: CloudflareTunnel[];
@@ -153,8 +154,9 @@ export const CloudflareTunnelView: React.FC<CloudflareTunnelViewProps> = ({
     }
   };
 
-  const handleSyncTunnel = () => {
+  const handleSyncTunnel = async () => {
     setIsSyncing(true);
+    await ApiService.syncCloudflare(tunnels).catch((e) => console.warn('Sync failed:', e));
     setTimeout(() => {
       setIsSyncing(false);
       setSyncSuccess(true);

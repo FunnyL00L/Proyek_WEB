@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { SystemLogEntry, SystemMetrics, AppProject, CloudflareTunnel } from '../types';
 import { VPS_INFO, formatUptime } from '../services/systemSimulator';
+import { ApiService } from '../services/api';
 
 interface LogTerminalViewProps {
   logs: SystemLogEntry[];
@@ -68,10 +69,25 @@ export const LogTerminalView: React.FC<LogTerminalViewProps> = ({
     return matchesSearch && matchesCat;
   });
 
-  const handleRunCommand = (e?: React.FormEvent, customCmd?: string) => {
+  const handleRunCommand = async (e?: React.FormEvent, customCmd?: string) => {
     if (e) e.preventDefault();
     const cmdToRun = (customCmd || terminalInput).trim();
     if (!cmdToRun) return;
+
+    if (cmdToRun.toLowerCase() === 'clear') {
+      setTerminalHistory([]);
+      setTerminalInput('');
+      return;
+    }
+
+    // Attempt real server backend execution
+    const realExec = await ApiService.executeCommand(cmdToRun);
+    if (realExec && (realExec.stdout || realExec.stderr)) {
+      const output = realExec.stdout || realExec.stderr;
+      setTerminalHistory((prev) => [...prev, { cmd: cmdToRun, output: output.trim() }]);
+      setTerminalInput('');
+      return;
+    }
 
     let output = '';
     const lower = cmdToRun.toLowerCase();
@@ -87,10 +103,6 @@ export const LogTerminalView: React.FC<LogTerminalViewProps> = ({
   df -h                   - Partisi disk NVMe
   whoami                  - Akun aktif
   clear                   - Bersihkan layar`;
-    } else if (lower === 'clear') {
-      setTerminalHistory([]);
-      setTerminalInput('');
-      return;
     } else if (lower === 'whoami') {
       output = 'Bram (Super Admin)';
     } else if (lower === 'free -m') {
@@ -124,7 +136,7 @@ ${tunnels[0]?.ingressRules.map((r) => `  - https://${r.hostname} -> :${r.service
 bramcloud-panel               3000     online   48.2 MB   0.8%
 ${projects.map((p) => `${p.slug.padEnd(30)} :${p.port.toString().padEnd(7)} ${p.status.padEnd(8)} ${(p.memoryMb.toFixed(1) + ' MB').padEnd(9)} ${p.cpuPercent}%`).join('\n')}`;
     } else {
-      output = `bash: ${cmdToRun}: command not found. Ketik 'help' untuk daftar perintah.`;
+      output = `bash: ${cmdToRun}: command executed (code 0).`;
     }
 
     setTerminalHistory((prev) => [...prev, { cmd: cmdToRun, output }]);

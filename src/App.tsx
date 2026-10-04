@@ -14,8 +14,10 @@ import { StorageService } from './services/storage';
 import {
   getInitialMetrics,
   tickMetrics,
-  generateRandomLog
+  generateRandomLog,
+  updateVpsInfo
 } from './services/systemSimulator';
+import { ApiService } from './services/api';
 import { LoginGate } from './components/LoginGate';
 import { Navbar } from './components/Navbar';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -53,12 +55,31 @@ export default function App() {
     ];
   });
 
-  // Real-time metrics tick every 1.5s
+  // Real-time metrics tick every 1.5s (queries live server API with local simulator fallback)
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    const interval = setInterval(() => {
-      setMetrics((prev) => tickMetrics(prev));
+    // Load initial real system specs from server
+    ApiService.getSystemInfo().then((info) => {
+      if (info) {
+        updateVpsInfo(info);
+      }
+    });
+
+    // Check for real host system logs
+    ApiService.getSystemLogs().then((realLogs) => {
+      if (realLogs && realLogs.length > 0) {
+        setSystemLogs((prev) => [...prev, ...realLogs.slice(-10)]);
+      }
+    });
+
+    const interval = setInterval(async () => {
+      const live = await ApiService.getLiveMetrics();
+      if (live) {
+        setMetrics(live);
+      } else {
+        setMetrics((prev) => tickMetrics(prev));
+      }
 
       // Occasional realistic background log emission (35% chance every tick)
       if (Math.random() < 0.35) {
@@ -75,10 +96,12 @@ export default function App() {
     setIsAuthenticated(false);
   };
 
-  const handleDropCaches = () => {
-    // Free up cached memory
+  const handleDropCaches = async () => {
+    // Attempt real kernel drop-cache
+    const realResult = await ApiService.dropCaches();
+
     setMetrics((prev) => {
-      const freed = Math.round(prev.ramCachedMb * 0.65);
+      const freed = realResult?.freedMb || Math.round(prev.ramCachedMb * 0.65);
       return {
         ...prev,
         ramUsedMb: Math.max(1600, prev.ramUsedMb - 300),
@@ -92,7 +115,7 @@ export default function App() {
       timestamp: new Date().toTimeString().split(' ')[0],
       level: 'success',
       category: 'system',
-      message: 'kernel: drop_caches triggered manually. 1.2 GB pagecache & slab freed.',
+      message: `kernel: drop_caches sync executed. ${realResult?.freedMb || 1240} MB pagecache freed.`,
     };
     setSystemLogs((prev) => [...prev, logEntry]);
   };

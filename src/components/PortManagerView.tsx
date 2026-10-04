@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search,
   Plus,
   AlertTriangle,
   Check,
+  RotateCw,
   X
 } from 'lucide-react';
 import { PortBinding, AppProject } from '../types';
 import { getAllAllocatedPorts, checkPortConflict, findNextAvailablePort, SYSTEM_PORTS } from '../services/portManager';
 import { StorageService } from '../services/storage';
+import { ApiService } from '../services/api';
 
 interface PortManagerViewProps {
   projects: AppProject[];
@@ -27,6 +29,22 @@ export const PortManagerView: React.FC<PortManagerViewProps> = ({
   const [filterType, setFilterType] = useState<'all' | 'system' | 'apps' | 'reserved'>('all');
   const [testPortInput, setTestPortInput] = useState<string>('');
   const [testResult, setTestResult] = useState<{ isConflict: boolean; reason?: string; occupyingService?: string } | null>(null);
+  const [liveServerPorts, setLiveServerPorts] = useState<PortBinding[]>([]);
+  const [isScanningLive, setIsScanningLive] = useState(false);
+
+  // Scan real listening ports on VPS host
+  const refreshLivePorts = async () => {
+    setIsScanningLive(true);
+    const ports = await ApiService.getLivePorts();
+    if (ports && ports.length > 0) {
+      setLiveServerPorts(ports);
+    }
+    setIsScanningLive(false);
+  };
+
+  useEffect(() => {
+    refreshLivePorts();
+  }, []);
 
   // Reserve modal state
   const [isReserveModalOpen, setIsReserveModalOpen] = useState(false);
@@ -35,6 +53,12 @@ export const PortManagerView: React.FC<PortManagerViewProps> = ({
   const [reserveNotes, setReserveNotes] = useState('');
 
   const allocatedMap = getAllAllocatedPorts(projects, customPorts);
+  // Merge live scanned ports into display
+  liveServerPorts.forEach((lp) => {
+    if (!allocatedMap.has(lp.port)) {
+      allocatedMap.set(lp.port, lp);
+    }
+  });
   const allList = Array.from(allocatedMap.values()).sort((a, b) => a.port - b.port);
 
   const filteredList = allList.filter((item) => {
@@ -51,12 +75,30 @@ export const PortManagerView: React.FC<PortManagerViewProps> = ({
     return true;
   });
 
-  const handleTestPort = (e: React.FormEvent) => {
+  const handleTestPort = async (e: React.FormEvent) => {
     e.preventDefault();
     const portNum = parseInt(testPortInput, 10);
     if (isNaN(portNum)) return;
+
+    // Check local client registry
     const res = checkPortConflict(portNum, projects, customPorts);
-    setTestResult(res);
+    if (res.isConflict) {
+      setTestResult(res);
+      return;
+    }
+
+    // Check real VPS socket state
+    const serverCheck = await ApiService.checkPortConflict(portNum);
+    if (serverCheck && serverCheck.isConflict) {
+      setTestResult({
+        isConflict: true,
+        reason: serverCheck.reason || `Port ${portNum} terdeteksi sedang digunakan oleh sistem operasi server VPS.`,
+        occupyingService: serverCheck.occupyingService || 'Linux Active Service',
+      });
+      return;
+    }
+
+    setTestResult({ isConflict: false });
   };
 
   const handleCreateReservation = (e: React.FormEvent) => {
@@ -127,13 +169,24 @@ export const PortManagerView: React.FC<PortManagerViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => setIsReserveModalOpen(true)}
-          className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-medium text-xs rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs self-start md:self-auto"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Reservasi Port Manual</span>
-        </button>
+        <div className="flex items-center gap-2 self-start md:self-auto">
+          <button
+            onClick={refreshLivePorts}
+            disabled={isScanningLive}
+            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            title="Pindai port listening aktual di server VPS"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${isScanningLive ? 'animate-spin text-sky-600' : ''}`} />
+            <span>{isScanningLive ? 'Memindai Port...' : 'Pindai Port VPS'}</span>
+          </button>
+          <button
+            onClick={() => setIsReserveModalOpen(true)}
+            className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-medium text-xs rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Reservasi Port Manual</span>
+          </button>
+        </div>
       </div>
 
       {/* Collision Tester Box */}

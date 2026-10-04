@@ -20,6 +20,7 @@ import {
 import { AppProject, CloudflareTunnel, PortBinding } from '../types';
 import { findNextAvailablePort, checkPortConflict } from '../services/portManager';
 import { StorageService } from '../services/storage';
+import { ApiService } from '../services/api';
 
 interface ProjectDeployerProps {
   projects: AppProject[];
@@ -141,7 +142,15 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
         }
       }
 
-      setTimeout(() => {
+      setTimeout(async () => {
+        // Notify backend server to write files and reload worker
+        await ApiService.updateProject({
+          slug: project.slug,
+          port: project.port,
+          name: project.name,
+          htmlPreviewContent: previewContent,
+        });
+
         const updated = projects.map((p) => {
           if (p.id === project.id) {
             return {
@@ -276,6 +285,17 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
       onUpdateProjects(updatedProjects);
       StorageService.saveProjects(updatedProjects);
 
+      // Trigger backend deployment to bind port and write project files
+      ApiService.deployProject({
+        id: newProj.id,
+        name: newProj.name,
+        slug: newProj.slug,
+        port: newProj.port,
+        type: newProj.type,
+        htmlPreviewContent: newProj.htmlPreviewContent,
+        envVars: newProj.envVars,
+      }).catch((e) => console.warn('Backend deploy notify:', e));
+
       if (enableCloudflare && chosenTunnel) {
         const updatedTunnels = tunnels.map((t) => {
           if (t.id === chosenTunnel.id) {
@@ -298,6 +318,7 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
         });
         onUpdateTunnels(updatedTunnels);
         StorageService.saveTunnels(updatedTunnels);
+        ApiService.syncCloudflare(updatedTunnels).catch((e) => console.warn('CF sync notify:', e));
       }
 
       StorageService.logAudit('DEPLOY_PROJECT', `${projectName} (Port ${effectivePort})`, 'success');
@@ -333,6 +354,11 @@ export const ProjectDeployer: React.FC<ProjectDeployerProps> = ({
     onUpdateProjects(updated);
     StorageService.saveProjects(updated);
     StorageService.logAudit('TOGGLE_PROJECT', `${project.name} (${newStatus})`, 'success');
+
+    // Notify backend runner
+    ApiService.toggleProject(project.slug, project.port, newStatus, project.name).catch((e) =>
+      console.warn('Backend toggle notify:', e)
+    );
   };
 
   const handleDeleteProject = (projectId: string) => {

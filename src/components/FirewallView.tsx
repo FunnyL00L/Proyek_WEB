@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Plus,
   Trash2,
@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { FirewallRule, BannedIp } from '../types';
 import { StorageService } from '../services/storage';
+import { ApiService } from '../services/api';
 
 interface FirewallViewProps {
   rules: FirewallRule[];
@@ -24,6 +25,15 @@ export const FirewallView: React.FC<FirewallViewProps> = ({
   const [isAddRuleOpen, setIsAddRuleOpen] = useState(false);
   const [isUfwEnabled, setIsUfwEnabled] = useState(true);
 
+  // Check live UFW status from VPS
+  useEffect(() => {
+    ApiService.getFirewallStatus().then((status) => {
+      if (status && typeof status.active === 'boolean') {
+        setIsUfwEnabled(status.active);
+      }
+    });
+  }, []);
+
   const [portInput, setPortInput] = useState<string>('8080');
   const [protocolInput, setProtocolInput] = useState<FirewallRule['protocol']>('TCP');
   const [actionInput, setActionInput] = useState<FirewallRule['action']>('ALLOW');
@@ -36,6 +46,7 @@ export const FirewallView: React.FC<FirewallViewProps> = ({
   const handleToggleUfw = () => {
     const newState = !isUfwEnabled;
     setIsUfwEnabled(newState);
+    ApiService.toggleFirewall(newState).catch((e) => console.warn('UFW toggle notify:', e));
     StorageService.logAudit('FIREWALL_STATUS', `UFW ${newState ? 'Aktif' : 'Nonaktif'}`, newState ? 'success' : 'warning');
   };
 
@@ -56,6 +67,7 @@ export const FirewallView: React.FC<FirewallViewProps> = ({
     const updated = [...rules, newRule];
     onUpdateRules(updated);
     StorageService.saveFirewallRules(updated);
+    ApiService.addFirewallRule(newRule).catch((e) => console.warn('UFW add notify:', e));
     StorageService.logAudit('FIREWALL_RULE_ADD', `${actionInput} ${portInput}/${protocolInput}`, 'success');
 
     setIsAddRuleOpen(false);
@@ -76,6 +88,7 @@ export const FirewallView: React.FC<FirewallViewProps> = ({
     const updated = rules.filter((x) => x.id !== ruleId);
     onUpdateRules(updated);
     StorageService.saveFirewallRules(updated);
+    ApiService.deleteFirewallRule(r).catch((e) => console.warn('UFW delete notify:', e));
     StorageService.logAudit('FIREWALL_RULE_DELETE', `Rule ${r.port}/${r.protocol} removed`, 'warning');
   };
 

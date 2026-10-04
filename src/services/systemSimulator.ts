@@ -120,3 +120,16 @@ export function formatUptime(seconds: number): string {
   const s = seconds % 60;
   return `${d}h ${h}j ${m}m ${s}d`;
 }
+
+export function updateVpsInfo(info: Partial<typeof VPS_INFO>) {
+  if (info.hostname) VPS_INFO.hostname = info.hostname;
+  if (info.publicIp) VPS_INFO.publicIp = info.publicIp;
+  if ((info as any).osDistro) VPS_INFO.os = (info as any).osDistro;
+  if (info.kernel) VPS_INFO.kernel = info.kernel;
+  if (info.cpuModel) VPS_INFO.cpuModel = info.cpuModel;
+  if (info.cores) VPS_INFO.cores = info.cores;
+  if (info.ramTotalMb) VPS_INFO.ramTotalMb = info.ramTotalMb;
+  if (info.installedEngines && Array.isArray(info.installedEngines)) {
+    VPS_INFO.installedEngines = info.installedEngines;
+  }
+}
