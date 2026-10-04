@@ -6,6 +6,9 @@ import {
   Check,
   RotateCw,
   ExternalLink,
+  AlertCircle,
+  Globe,
+  ArrowRight,
   X
 } from 'lucide-react';
 import { CloudflareTunnel, IngressRule, AppProject } from '../types';
@@ -75,8 +78,22 @@ export const CloudflareTunnelView: React.FC<CloudflareTunnelViewProps> = ({
   const [copiedConfig, setCopiedConfig] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState(false);
+  const [routingDnsHost, setRoutingDnsHost] = useState<string | null>(null);
+  const [dnsFeedback, setDnsFeedback] = useState<{ host: string; message: string; success: boolean } | null>(null);
 
   const currentTunnel = tunnels.find((t) => t.id === activeTunnelId) || tunnels[0];
+
+  const handleRouteDns = async (hostname: string) => {
+    setRoutingDnsHost(hostname);
+    setDnsFeedback(null);
+    const res = await ApiService.routeDns(hostname, currentTunnel?.tunnelId);
+    setRoutingDnsHost(null);
+    setDnsFeedback({
+      host: hostname,
+      message: res?.message || `Perintah 'cloudflared tunnel route dns' selesai dijalankan.`,
+      success: !!res?.success,
+    });
+  };
 
   const handleSelectProject = (projId: string) => {
     setSelectedProjectId(projId);
@@ -337,6 +354,69 @@ ${currentTunnel?.ingressRules
         </div>
       </div>
 
+      {/* DNS NXDOMAIN Troubleshooting & CNAME Record Guide */}
+      <div className="bg-gradient-to-r from-amber-50/80 to-orange-50/80 border border-amber-200/90 rounded-xl p-5 shadow-xs">
+        <div className="flex items-start gap-3.5">
+          <div className="p-2 bg-amber-100 text-amber-800 rounded-lg shrink-0 mt-0.5">
+            <AlertCircle className="w-5 h-5" />
+          </div>
+          <div className="space-y-2 flex-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <h3 className="font-bold text-sm text-amber-950">
+                Solusi Error <code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-900 font-mono">DNS_PROBE_FINISHED_NXDOMAIN</code>
+              </h3>
+              <span className="text-[10px] font-mono px-2 py-0.5 bg-amber-200/80 text-amber-900 rounded font-semibold self-start sm:self-auto">
+                Wajib Didaftarkan di Cloudflare DNS
+              </span>
+            </div>
+            <p className="text-xs text-amber-900/90 leading-relaxed">
+              Jika browser Anda menampilkan <strong className="font-mono">NXDOMAIN</strong> saat membuka subdomain seperti <code className="bg-amber-100 px-1 py-0.5 rounded font-mono font-bold">chatai.gitainfo.online</code>, itu karena <strong>DNS Record di Cloudflare belum ditambahkan</strong>. Ingress VPS baru memetakan port lokal, namun DNS global Cloudflare belum mengenalnya.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
+              <div className="p-3 bg-white/90 rounded-lg border border-amber-200/90">
+                <span className="font-bold text-slate-900 block mb-1">
+                  1. Tambah CNAME Manual (Di Cloudflare Dashboard):
+                </span>
+                <p className="text-slate-600 text-[11px] mb-2">
+                  Buka tab DNS Records di dash.cloudflare.com ➔ Klik <strong>+ Add record</strong>:
+                </p>
+                <div className="bg-slate-900 text-slate-200 p-2.5 rounded font-mono text-[11px] space-y-1">
+                  <div>Type: <span className="text-sky-400 font-bold">CNAME</span></div>
+                  <div>Name: <span className="text-emerald-400 font-bold">chatai</span> (atau subdomain lain)</div>
+                  <div className="break-all">Target: <span className="text-amber-300 font-bold select-all">{currentTunnel?.tunnelId || 'c153020c-6f30-44ac-be40-5548a373c12e'}.cfargotunnel.com</span></div>
+                  <div>Proxy status: <span className="text-amber-400 font-semibold">Proxied (Awan Orange ☁️)</span></div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-white/90 rounded-lg border border-amber-200/90 flex flex-col justify-between">
+                <div>
+                  <span className="font-bold text-slate-900 block mb-1">
+                    2. Atau Jalankan Perintah Terminal VPS:
+                  </span>
+                  <p className="text-slate-600 text-[11px] mb-2">
+                    Jalankan perintah ini di SSH VPS untuk membuat DNS record otomatis ke akun Cloudflare Anda:
+                  </p>
+                  <pre className="p-2.5 bg-slate-900 text-slate-100 rounded text-[11px] font-mono overflow-x-auto select-all">
+cloudflared tunnel route dns {currentTunnel?.tunnelId || 'c153020c-6f30-44ac-be40-5548a373c12e'} chatai.gitainfo.online
+                  </pre>
+                </div>
+                <div className="mt-2 text-[11px] text-slate-500 font-sans">
+                  💡 Tips: Klik tombol <strong>"Daftarkan DNS ke Cloudflare"</strong> di tabel bawah untuk mencoba pendaftaran otomatis via backend.
+                </div>
+              </div>
+            </div>
+
+            {dnsFeedback && (
+              <div className={`mt-2.5 p-3 rounded-lg text-xs font-mono border ${dnsFeedback.success ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-900 border-amber-300'}`}>
+                <div className="font-bold mb-0.5">Hasil Pendaftaran DNS ({dnsFeedback.host}):</div>
+                <div>{dnsFeedback.message}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Selected Tunnel Ingress Rules Table */}
       {currentTunnel && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
@@ -375,7 +455,7 @@ ${currentTunnel?.ingressRules
                 <tr>
                   <th className="py-2.5 px-4 font-medium">Domain Publik (HTTPS)</th>
                   <th className="py-2.5 px-4 font-medium">Target Port Service</th>
-                  <th className="py-2.5 px-4 font-medium">Aplikasi Terkait</th>
+                  <th className="py-2.5 px-4 font-medium">Status DNS Cloudflare</th>
                   <th className="py-2.5 px-4 font-medium text-right">Aksi</th>
                 </tr>
               </thead>
@@ -388,7 +468,9 @@ ${currentTunnel?.ingressRules
                   </tr>
                 ) : (
                   currentTunnel.ingressRules.map((rule) => {
-                    const linkedApp = projects.find((p) => p.port === rule.servicePort);
+                    const isKnownActive = ['app.gitainfo.online', 'folder.gitainfo.online', 'gitainfo.online'].includes(rule.hostname);
+                    const isRouting = routingDnsHost === rule.hostname;
+
                     return (
                       <tr key={rule.id} className="hover:bg-slate-50/60 transition-colors">
                         <td className="py-3 px-4 font-semibold text-slate-900">
@@ -397,10 +479,35 @@ ${currentTunnel?.ingressRules
                         <td className="py-3 px-4 text-sky-700 font-medium">
                           {rule.protocol}://localhost:{rule.servicePort}
                         </td>
-                        <td className="py-3 px-4 font-sans text-slate-500">
-                          {linkedApp ? linkedApp.name : 'Custom Service'}
+                        <td className="py-3 px-4 font-sans">
+                          {isKnownActive ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[11px] font-medium">
+                              <Check className="w-3 h-3" />
+                              <span>DNS Aktif di Dashboard</span>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleRouteDns(rule.hostname)}
+                              disabled={isRouting}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
+                              title="Daftarkan CNAME DNS record ke Cloudflare sekarang"
+                            >
+                              <RotateCw className={`w-3 h-3 ${isRouting ? 'animate-spin' : ''}`} />
+                              <span>{isRouting ? 'Mendaftarkan...' : 'Daftarkan DNS Cloudflare'}</span>
+                            </button>
+                          )}
                         </td>
-                        <td className="py-3 px-4 text-right font-sans">
+                        <td className="py-3 px-4 text-right font-sans space-x-2">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(`${currentTunnel.tunnelId}.cfargotunnel.com`);
+                              alert(`CNAME Target tersalin:\n${currentTunnel.tunnelId}.cfargotunnel.com\n\nMasukkan di Cloudflare Dashboard DNS!`);
+                            }}
+                            className="text-xs text-sky-700 hover:text-sky-900 transition-colors cursor-pointer"
+                            title="Salin CNAME Target untuk Cloudflare Dashboard"
+                          >
+                            Salin CNAME
+                          </button>
                           <button
                             onClick={() => handleDeleteRule(rule.id)}
                             className="text-xs text-rose-600 hover:text-rose-800 transition-colors cursor-pointer"

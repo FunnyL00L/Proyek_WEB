@@ -941,16 +941,46 @@ ${combinedRules
     // Attempt daemon restart / reload
     await runCmd('systemctl restart cloudflared || systemctl reload cloudflared || pkill -HUP cloudflared || true');
 
+    // Automatically trigger cloudflared tunnel route dns for each hostname to create DNS CNAME
+    for (const rule of combinedRules) {
+      if (rule.hostname && rule.hostname !== 'localhost') {
+        runCmd(`cloudflared tunnel route dns ${mainTunnelId} ${rule.hostname} || true`);
+      }
+    }
+
     res.json({
       success: true,
       message: `Konfigurasi Cloudflare Tunnel (${mainTunnelId}) berhasil diperbarui dan disinkronkan ke ${writtenPaths.join(', ')}`,
       tunnelsCount: tunnels?.length || 1,
       rulesCount: combinedRules.length,
       writtenPaths,
+      cnameTarget: `${mainTunnelId}.cfargotunnel.com`,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Explicit Route DNS endpoint for single hostname
+app.post('/api/cloudflare/route-dns', async (req, res) => {
+  const { hostname, tunnelId } = req.body;
+  const tid = tunnelId || 'c153020c-6f30-44ac-be40-5548a373c12e';
+  if (!hostname) {
+    return res.status(400).json({ error: 'Hostname is required' });
+  }
+
+  const cmd = `cloudflared tunnel route dns ${tid} ${hostname}`;
+  const out = await runCmd(cmd);
+
+  res.json({
+    success: out.code === 0,
+    command: cmd,
+    output: out.stdout || out.stderr,
+    cnameTarget: `${tid}.cfargotunnel.com`,
+    message: out.code === 0
+      ? `DNS CNAME untuk ${hostname} berhasil didaftarkan ke tunnel ${tid}.`
+      : `Pendaftaran DNS via CLI: ${out.stdout || out.stderr || 'Silakan tambahkan CNAME manual di Cloudflare Dashboard jika token belum diizinkan.'}`
+  });
 });
 
 // 11. Storage Cleanup Endpoint (Cleans Root eMMC & SSD temporary files)

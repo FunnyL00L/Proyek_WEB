@@ -230,6 +230,23 @@ export const ApiService = {
     return null;
   },
 
+  // Register DNS CNAME record via cloudflared tunnel route dns
+  async routeDns(hostname: string, tunnelId?: string): Promise<{ success: boolean; message: string; output?: string; cnameTarget?: string } | null> {
+    try {
+      const res = await fetch('/api/cloudflare/route-dns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostname, tunnelId }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      // Ignore
+    }
+    return null;
+  },
+
   // Perform disk storage cleanup on Root eMMC and SSD
   async cleanStorage(): Promise<{ success: boolean; message: string; freedMb: number } | null> {
     try {
